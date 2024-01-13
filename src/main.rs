@@ -50,8 +50,8 @@ fn spawn_http_server(listener: TcpListener, tx_data: MutexSender, mut rx_term: R
     })
 }
 
-async fn task(i: i64, tx_data: &MutexSender) -> Result<(), BoxError> {
-    let msg = format!("Foo {}", i);
+async fn task(iteration: i64, tx_data: &MutexSender) -> Result<(), BoxError> {
+    let msg = format!("Foo {}", iteration);
     debug!("Send '{}'", msg);
     let guard = tx_data.lock().await;
     (*guard).send(msg)?;
@@ -60,12 +60,12 @@ async fn task(i: i64, tx_data: &MutexSender) -> Result<(), BoxError> {
 
 async fn repeat(tx_data: MutexSender, mut rx_term: Receiver<()>) {
     let mut interval = time::interval(Duration::from_secs(1));
-    let mut i = 0;
+    let mut iteration = 0;
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                i += 1;
-                if let Err(e) = task(i, &tx_data).await {
+                iteration += 1;
+                if let Err(e) = task(iteration, &tx_data).await {
                     warn!("Task failed: {:?}, leave scheduler", e);
                     break;
                 }
@@ -86,7 +86,7 @@ fn spawn_scheduler(tx_data: MutexSender, rx_term: Receiver<()>) -> JoinHandle<()
 }
 
 // See https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-async fn await_shutdown() {
+async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -114,18 +114,19 @@ async fn await_shutdown() {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
+    // Channel for sending data from the scheduler to the SSE handler
     let (tx_data, _rx_data) = broadcast::channel::<String>(5);
     let tx_data = Arc::new(Mutex::new(tx_data));
 
+    // Channel for distributing the termination signal to the treads
     let (tx_term, rx_term1) = broadcast::channel(1);
     let rx_term2 = tx_term.subscribe();
 
     let listener = TcpListener::bind("localhost:3000").await?;
     let handle1 = spawn_http_server(listener, tx_data.clone(), rx_term1);
-
     let handle2 = spawn_scheduler(tx_data.clone(), rx_term2);
 
-    await_shutdown().await;
+    shutdown_signal().await;
     info!("Termination signal received");
     tx_term.send(())?;
 
