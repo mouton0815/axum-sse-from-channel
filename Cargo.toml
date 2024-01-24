@@ -7,7 +7,8 @@ edition = "2021"
 tokio = { version = "1.15", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 axum = "0.7"
-axum-macros = "0.4.0"
 log = "0.4.20"
 env_logger = "0.10.1"
 futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

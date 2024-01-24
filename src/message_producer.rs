@@ -4,29 +4,30 @@ use log::{debug, info, warn};
 use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
 use tokio::time;
-use crate::types::MutexSender;
+use crate::Message;
+use crate::shared_types::MutexSender;
 
-async fn task(iteration: i64, tx_data: &MutexSender) -> Result<(), BoxError> {
-    let msg = format!("Foo {}", iteration);
-    debug!("Send '{}'", msg);
-    let guard = tx_data.lock().await;
+async fn task(iteration: i64, tx_message: &MutexSender) -> Result<(), BoxError> {
+    let msg = Message::new(format!("Foo {}", iteration));
+    debug!("Send '{:?}'", msg);
+    let guard = tx_message.lock().await;
     (*guard).send(msg)?;
     Ok(())
 }
 
-async fn repeat(tx_data: MutexSender, mut rx_term: Receiver<()>) {
+async fn repeat(tx_message: MutexSender, mut rx_shutdown: Receiver<()>) {
     let mut interval = time::interval(Duration::from_secs(1));
     let mut iteration = 0;
     loop {
         tokio::select! {
             _ = interval.tick() => {
                 iteration += 1;
-                if let Err(e) = task(iteration, &tx_data).await {
+                if let Err(e) = task(iteration, &tx_message).await {
                     warn!("Task failed: {:?}, leave producer", e);
                     break;
                 }
             },
-            _ = rx_term.recv() => {
+            _ = rx_shutdown.recv() => {
                 info!("Termination signal received, leave producer");
                 break;
             }
@@ -34,9 +35,9 @@ async fn repeat(tx_data: MutexSender, mut rx_term: Receiver<()>) {
     }
 }
 
-pub fn spawn_data_producer(tx_data: MutexSender, rx_term: Receiver<()>) -> JoinHandle<()> {
-    info!("Spawn data producer");
+pub fn spawn_message_producer(tx_message: MutexSender, rx_shutdown: Receiver<()>) -> JoinHandle<()> {
+    info!("Spawn message producer");
     tokio::spawn(async move {
-        repeat(tx_data, rx_term).await;
+        repeat(tx_message, rx_shutdown).await;
     })
 }
